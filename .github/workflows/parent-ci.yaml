@@ -28,6 +28,9 @@ jobs:
   sonarqube:
     name: SonarQube Scan
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -59,6 +62,9 @@ jobs:
     name: Snyk SCA Scan
     needs: sonarqube
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -139,6 +145,9 @@ jobs:
     name: Trivy Vulnerability Scan
     needs: docker-build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - name: Download image artifact
         uses: actions/download-artifact@v4
