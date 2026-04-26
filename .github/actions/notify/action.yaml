@@ -139,12 +139,10 @@ runs:
           esac
         fi
 
-        DETAIL_ENCODED="${DETAIL//$'
-'/\\n}"
+        DETAIL_ENCODED="${DETAIL//$'\n'/\\n}"
         echo "detail=$DETAIL_ENCODED" >> $GITHUB_OUTPUT
 
-        EMAIL_DETAIL_REAL="${EMAIL_DETAIL//\\n/$'
-'}"
+        EMAIL_DETAIL_REAL="${EMAIL_DETAIL//\\n/$'\n'}"
         echo "email_detail<<EOF_EMAIL_MARKER" >> $GITHUB_OUTPUT
         echo "$EMAIL_DETAIL_REAL" >> $GITHUB_OUTPUT
         echo "EOF_EMAIL_MARKER" >> $GITHUB_OUTPUT
