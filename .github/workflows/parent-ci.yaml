@@ -6,6 +6,9 @@ on:
       image_name:
         required: true
         type: string
+      helm_app_name:
+        required: false
+        type: string
     secrets:
       PAT_TOKEN:
         required: true
@@ -217,9 +220,66 @@ jobs:
           gmail_app_password: ${{ secrets.GMAIL_APP_PASSWORD }}
           notify_email_to: ${{ secrets.NOTIFY_EMAIL_TO }}
 
+  update-helm-dev-tag:
+    name: Update Helm Dev Tag
+    needs: [docker-build, docker-push]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Vaultrix-Helm
+        uses: actions/checkout@v4
+        with:
+          repository: Vaultrix-in/Vaultrix-Helm
+          token: ${{ secrets.PAT_TOKEN }}
+          path: Vaultrix-Helm
+
+      - name: Resolve Helm app path
+        id: helm-app
+        env:
+          HELM_APP_NAME: ${{ inputs.helm_app_name }}
+          IMAGE_NAME: ${{ inputs.image_name }}
+        run: |
+          app_name="${HELM_APP_NAME:-$IMAGE_NAME}"
+          echo "app_name=$app_name" >> "$GITHUB_OUTPUT"
+
+      - name: Update values-dev image tag with yq
+        uses: mikefarah/yq@v4.44.3
+        with:
+          cmd: >
+            yq -i
+            '.image.tag = "${{ needs.docker-build.outputs.docker_tag }}"'
+            Vaultrix-Helm/apps/${{ steps.helm-app.outputs.app_name }}/values-dev.yaml
+
+      - name: Commit and push Helm tag update
+        working-directory: Vaultrix-Helm
+        env:
+          APP_NAME: ${{ steps.helm-app.outputs.app_name }}
+          IMAGE_TAG: ${{ needs.docker-build.outputs.docker_tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "apps/${APP_NAME}/values-dev.yaml"
+          if git diff --cached --quiet; then
+            echo "No values-dev tag change detected."
+            exit 0
+          fi
+          git commit -m "chore(${APP_NAME}): bump dev image tag to ${IMAGE_TAG}"
+          git push origin main
+
+      - name: Notify on Failure
+        if: failure()
+        uses: Vaultrix-in/Vaultrix-CI/.github/actions/notify@main
+        with:
+          status: 'failed'
+          pipeline: 'Helm'
+          job_name: 'update-helm-dev-tag'
+          slack_webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          gmail_username: ${{ secrets.GMAIL_USERNAME }}
+          gmail_app_password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          notify_email_to: ${{ secrets.NOTIFY_EMAIL_TO }}
+
   notify-success:
     name: Pipeline Success Notification
-    needs: [sonarqube, snyk-sca, docker-build, trivy-scan, docker-push]
+    needs: [sonarqube, snyk-sca, docker-build, trivy-scan, docker-push, update-helm-dev-tag]
     runs-on: ubuntu-latest
     if: success()
     steps:
