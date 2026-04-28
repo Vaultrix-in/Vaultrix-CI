@@ -121,7 +121,7 @@ jobs:
 
       - name: Notify on failure
         if: failure()
-        uses: Vaultrix-in/Vaultrix-CI/.github/actions/notify@feat/ci-workflows
+        uses: Vaultrix-in/Vaultrix-CI/.github/actions/notify@main
         with:
           status: failed
           pipeline: CI Build

@@ -33,7 +33,7 @@ jobs:
     permissions:
       contents: read
       security-events: write
-    uses: Vaultrix-in/Vaultrix-CI/.github/workflows/sonarcheck.yaml@feat/ci-workflows
+    uses: Vaultrix-in/Vaultrix-CI/.github/workflows/sonarcheck.yaml@main
     with:
       image_name: ${{ inputs.image_name }}
     secrets:
@@ -50,7 +50,7 @@ jobs:
     permissions:
       contents: read
       security-events: write
-    uses: Vaultrix-in/Vaultrix-CI/.github/workflows/snykcheck.yaml@feat/ci-workflows
+    uses: Vaultrix-in/Vaultrix-CI/.github/workflows/snykcheck.yaml@main
     with:
       image_name: ${{ inputs.image_name }}
     secrets:
@@ -67,7 +67,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
-    uses: Vaultrix-in/Vaultrix-CI/.github/workflows/ci-build.yaml@feat/ci-workflows
+    uses: Vaultrix-in/Vaultrix-CI/.github/workflows/ci-build.yaml@main
     with:
       image_name: ${{ inputs.image_name }}
       helm_app_name: ${{ inputs.helm_app_name }}
