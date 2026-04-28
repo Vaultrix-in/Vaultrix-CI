@@ -1,4 +1,4 @@
-name: Reusable Build and Push
+﻿name: Reusable Pipeline Orchestrator
 
 on:
   workflow_call:
@@ -28,268 +28,52 @@ on:
         required: false
 
 jobs:
-  sonarqube:
-    name: SonarQube Scan
-    runs-on: ubuntu-latest
+  sonarcheck:
+    name: sonarcheck
     permissions:
       contents: read
       security-events: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+    uses: Vaultrix-in/Vaultrix-CI/.github/workflows/sonarcheck.yaml@feat/ci-workflows
+    with:
+      image_name: ${{ inputs.image_name }}
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      GMAIL_USERNAME: ${{ secrets.GMAIL_USERNAME }}
+      GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+      NOTIFY_EMAIL_TO: ${{ secrets.NOTIFY_EMAIL_TO }}
 
-      - name: SonarQube Scan
-        uses: SonarSource/sonarqube-scan-action@v2
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-        with:
-          args: >
-            -Dsonar.projectKey=${{ github.repository.owner.login }}_${{ inputs.image_name }}
-
-      - name: Notify on Failure
-        if: failure()
-        uses: Vaultrix-in/Vaultrix-CI/.github/actions/notify@main
-        with:
-          status: 'failed'
-          pipeline: 'CI'
-          job_name: 'sonarqube'
-          slack_webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
-          gmail_username: ${{ secrets.GMAIL_USERNAME }}
-          gmail_app_password: ${{ secrets.GMAIL_APP_PASSWORD }}
-          notify_email_to: ${{ secrets.NOTIFY_EMAIL_TO }}
-
-  snyk-sca:
-    name: Snyk SCA Scan
-    needs: sonarqube
-    runs-on: ubuntu-latest
+  snykcheck:
+    name: snykcheck
+    needs: sonarcheck
     permissions:
       contents: read
       security-events: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    uses: Vaultrix-in/Vaultrix-CI/.github/workflows/snykcheck.yaml@feat/ci-workflows
+    with:
+      image_name: ${{ inputs.image_name }}
+    secrets:
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      GMAIL_USERNAME: ${{ secrets.GMAIL_USERNAME }}
+      GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+      NOTIFY_EMAIL_TO: ${{ secrets.NOTIFY_EMAIL_TO }}
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install dependencies
-        run: npm ci || npm install
-
-      - name: Run Snyk to check for vulnerabilities
-        uses: snyk/actions/node@master
-        continue-on-error: true # Ensure we always generate sarif even if vulnerabilities exist
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        with:
-          args: --sarif-file-output=snyk.sarif
-
-      - name: Upload Snyk SARIF to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: snyk.sarif
-
-      - name: Notify on Failure
-        if: failure()
-        uses: Vaultrix-in/Vaultrix-CI/.github/actions/notify@main
-        with:
-          status: 'failed'
-          pipeline: 'CI'
-          job_name: 'snyk-sca'
-          slack_webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
-          gmail_username: ${{ secrets.GMAIL_USERNAME }}
-          gmail_app_password: ${{ secrets.GMAIL_APP_PASSWORD }}
-          notify_email_to: ${{ secrets.NOTIFY_EMAIL_TO }}
-
-  docker-build:
-    name: Docker Build
-    needs: snyk-sca
-    runs-on: ubuntu-latest
-    outputs:
-      docker_tag: ${{ steps.sha.outputs.short_sha }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Calculate short SHA
-        id: sha
-        run: echo "short_sha=${GITHUB_SHA::5}" >> $GITHUB_OUTPUT
-
-      - name: Build Docker image locally
-        run: docker build -t ghcr.io/vaultrix-in/${{ inputs.image_name }}:${{ steps.sha.outputs.short_sha }} .
-
-      - name: Save Docker image to tar
-        run: docker save ghcr.io/vaultrix-in/${{ inputs.image_name }}:${{ steps.sha.outputs.short_sha }} > image.tar
-
-      - name: Upload image artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: docker-image
-          path: image.tar
-          retention-days: 1
-
-      - name: Notify on Failure
-        if: failure()
-        uses: Vaultrix-in/Vaultrix-CI/.github/actions/notify@main
-        with:
-          status: 'failed'
-          pipeline: 'Docker'
-          job_name: 'docker-build'
-          slack_webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
-          gmail_username: ${{ secrets.GMAIL_USERNAME }}
-          gmail_app_password: ${{ secrets.GMAIL_APP_PASSWORD }}
-          notify_email_to: ${{ secrets.NOTIFY_EMAIL_TO }}
-
-  trivy-scan:
-    name: Trivy Vulnerability Scan
-    needs: docker-build
-    runs-on: ubuntu-latest
+  ci-build:
+    name: ci-build
+    needs: [sonarcheck, snykcheck]
     permissions:
       contents: read
+      packages: write
       security-events: write
-    steps:
-      - name: Download image artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: docker-image
-
-      - name: Load Docker image
-        run: docker load -i image.tar
-
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: 'ghcr.io/vaultrix-in/${{ inputs.image_name }}:${{ needs.docker-build.outputs.docker_tag }}'
-          format: 'sarif'
-          output: 'trivy.sarif'
-          severity: 'CRITICAL,HIGH'
-
-      - name: Upload Trivy SARIF to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: trivy.sarif
-
-      - name: Notify on Failure
-        if: failure()
-        uses: Vaultrix-in/Vaultrix-CI/.github/actions/notify@main
-        with:
-          status: 'failed'
-          pipeline: 'Docker'
-          job_name: 'trivy-scan'
-          slack_webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
-          gmail_username: ${{ secrets.GMAIL_USERNAME }}
-          gmail_app_password: ${{ secrets.GMAIL_APP_PASSWORD }}
-          notify_email_to: ${{ secrets.NOTIFY_EMAIL_TO }}
-
-  docker-push:
-    name: Docker Push to GHCR
-    needs: [docker-build, trivy-scan]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download image artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: docker-image
-
-      - name: Load Docker image
-        run: docker load -i image.tar
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.PAT_TOKEN }}
-
-      - name: Push Docker image
-        run: docker push ghcr.io/vaultrix-in/${{ inputs.image_name }}:${{ needs.docker-build.outputs.docker_tag }}
-
-      - name: Notify on Failure
-        if: failure()
-        uses: Vaultrix-in/Vaultrix-CI/.github/actions/notify@main
-        with:
-          status: 'failed'
-          pipeline: 'Docker'
-          job_name: 'docker-push'
-          slack_webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
-          gmail_username: ${{ secrets.GMAIL_USERNAME }}
-          gmail_app_password: ${{ secrets.GMAIL_APP_PASSWORD }}
-          notify_email_to: ${{ secrets.NOTIFY_EMAIL_TO }}
-
-  update-helm-dev-tag:
-    name: Update Helm Dev Tag
-    needs: [docker-build, docker-push]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Vaultrix-Helm
-        uses: actions/checkout@v4
-        with:
-          repository: Vaultrix-in/Vaultrix-Helm
-          token: ${{ secrets.PAT_TOKEN }}
-          path: Vaultrix-Helm
-
-      - name: Resolve Helm app path
-        id: helm-app
-        env:
-          HELM_APP_NAME: ${{ inputs.helm_app_name }}
-          IMAGE_NAME: ${{ inputs.image_name }}
-        run: |
-          app_name="${HELM_APP_NAME:-$IMAGE_NAME}"
-          echo "app_name=$app_name" >> "$GITHUB_OUTPUT"
-
-      - name: Update values-dev image tag with yq
-        uses: mikefarah/yq@v4.44.3
-        with:
-          cmd: >
-            yq -i
-            '.image.tag = "${{ needs.docker-build.outputs.docker_tag }}"'
-            Vaultrix-Helm/apps/${{ steps.helm-app.outputs.app_name }}/values-dev.yaml
-
-      - name: Commit and push Helm tag update
-        working-directory: Vaultrix-Helm
-        env:
-          APP_NAME: ${{ steps.helm-app.outputs.app_name }}
-          IMAGE_TAG: ${{ needs.docker-build.outputs.docker_tag }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "apps/${APP_NAME}/values-dev.yaml"
-          if git diff --cached --quiet; then
-            echo "No values-dev tag change detected."
-            exit 0
-          fi
-          git commit -m "chore(${APP_NAME}): bump dev image tag to ${IMAGE_TAG}"
-          git push origin main
-
-      - name: Notify on Failure
-        if: failure()
-        uses: Vaultrix-in/Vaultrix-CI/.github/actions/notify@main
-        with:
-          status: 'failed'
-          pipeline: 'Helm'
-          job_name: 'update-helm-dev-tag'
-          slack_webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
-          gmail_username: ${{ secrets.GMAIL_USERNAME }}
-          gmail_app_password: ${{ secrets.GMAIL_APP_PASSWORD }}
-          notify_email_to: ${{ secrets.NOTIFY_EMAIL_TO }}
-
-  notify-success:
-    name: Pipeline Success Notification
-    needs: [sonarqube, snyk-sca, docker-build, trivy-scan, docker-push, update-helm-dev-tag]
-    runs-on: ubuntu-latest
-    if: success()
-    steps:
-      - name: Notify on Success
-        uses: Vaultrix-in/Vaultrix-CI/.github/actions/notify@main
-        with:
-          status: 'success'
-          pipeline: 'Docker'
-          job_name: 'all'
-          slack_webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
-          gmail_username: ${{ secrets.GMAIL_USERNAME }}
-          gmail_app_password: ${{ secrets.GMAIL_APP_PASSWORD }}
-          notify_email_to: ${{ secrets.NOTIFY_EMAIL_TO }}\n
+    uses: Vaultrix-in/Vaultrix-CI/.github/workflows/ci-build.yaml@feat/ci-workflows
+    with:
+      image_name: ${{ inputs.image_name }}
+      helm_app_name: ${{ inputs.helm_app_name }}
+    secrets:
+      PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      GMAIL_USERNAME: ${{ secrets.GMAIL_USERNAME }}
+      GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+      NOTIFY_EMAIL_TO: ${{ secrets.NOTIFY_EMAIL_TO }}

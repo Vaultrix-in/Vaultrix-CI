@@ -1,0 +1,55 @@
+﻿name: sonarcheck
+
+on:
+  workflow_call:
+    inputs:
+      image_name:
+        required: true
+        type: string
+    secrets:
+      SONAR_TOKEN:
+        required: true
+      SONAR_HOST_URL:
+        required: true
+      SLACK_WEBHOOK_URL:
+        required: true
+      GMAIL_USERNAME:
+        required: false
+      GMAIL_APP_PASSWORD:
+        required: false
+      NOTIFY_EMAIL_TO:
+        required: false
+
+jobs:
+  sonarcheck:
+    name: sonarcheck
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run SonarQube scan
+        uses: SonarSource/sonarqube-scan-action@v2
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          args: >
+            -Dsonar.projectKey=${{ github.repository_owner }}_${{ inputs.image_name }}
+
+      - name: Notify on failure
+        if: failure()
+        uses: Vaultrix-in/Vaultrix-CI/.github/actions/notify@feat/ci-workflows
+        with:
+          status: failed
+          pipeline: PR Checks
+          job_name: sonarqube
+          slack_webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          gmail_username: ${{ secrets.GMAIL_USERNAME }}
+          gmail_app_password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          notify_email_to: ${{ secrets.NOTIFY_EMAIL_TO }}
